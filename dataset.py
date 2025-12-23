@@ -1,5 +1,5 @@
 import numpy as np
-from .io import load_json
+from .io_utils import load_json
 from .transforms import interpolate_gesture, strip_timestamps, resample_stroke, get_velocity_rep, normalize_data, pad_data, resample_data, remove_first_dimension
 from .utils import get_percentile, eucl_dist
 
