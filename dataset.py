@@ -1,13 +1,16 @@
 import numpy as np
 from .io import load_json
-from .transforms import interpolate_gesture, strip_timestamps, resample_stroke
+from .transforms import interpolate_gesture, strip_timestamps, resample_stroke, get_velocity_rep, normalize_data, pad_data, resample_data
+from .utils import get_percentile
 
 class Dataset:
-    def __init__(self, gestures, classes, has_timestamps, dt=None, classes_oh=False, class_dims=None):
+    def __init__(self, gestures, classes, has_timestamps, representation, interpolated=False, dt=None, classes_oh=False, class_dims=None):
         self.gestures = gestures
         self.has_timestamps = has_timestamps
         self.class_dims = class_dims
         self.dt = dt
+        self.representation = representation
+        self.interpolated = interpolated
 
         if classes_oh:
             self.classes_oh = classes
@@ -27,7 +30,7 @@ class Dataset:
                     self.classes_oh.append(sample_oh)
 
     @classmethod
-    def from_json(cls, path, interpolate=False, dt=0.02, drop_timestamps=False, classes_oh=False, class_dims=None):
+    def from_json(cls, path, dt=0.02, drop_timestamps=False, classes_oh=False, class_dims=None):
         raw = load_json(path)
 
         gestures = []
@@ -46,11 +49,6 @@ class Dataset:
             if has_timestamps is None:
                 has_timestamps = len(gesture[0][0]) == 3
 
-            if interpolate:
-                if not has_timestamps:
-                    raise ValueError("Interpolation needs timestamps.")
-                gesture = interpolate_gesture(gesture, dt)
-
             if drop_timestamps and has_timestamps:
                 gesture = strip_timestamps(gesture)
                 has_timestamps = False
@@ -58,7 +56,7 @@ class Dataset:
             gestures.append(gesture)
             classes.append(cls_vals)
 
-        return cls(gestures=gestures, classes=classes, has_timestamps=has_timestamps, classes_oh=classes_oh, class_dims=class_dims)
+        return cls(gestures=gestures, classes=classes, has_timestamps=has_timestamps, representation="position", dt=dt, classes_oh=classes_oh, class_dims=class_dims)
     
     def __len__(self):
         return len(self.gestures)
@@ -66,9 +64,12 @@ class Dataset:
     def num_classes(self):
         return self.classes.shape[1]
     
-    def get_class(self, idx):
+    def get_class(self, idx, ohe=False):
         """idx = class index"""
-        return self.classes[:, idx]
+        if ohe:
+            return self.classes_oh[:, idx]
+        else:
+            return self.classes[:, idx]
     
     def get_gestures(self):
         return self.gestures
@@ -79,7 +80,7 @@ class Dataset:
         gestures = [g for g, m in zip(self.gestures, mask) if m]
         classes = self.classes[mask]
 
-        return Dataset(gestures, classes, self.has_timestamps)
+        return Dataset(gestures=gestures, classes=classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=True, dt=self.dt)
     
     def mean_gesture(self, mode="time", num_points=64, plot=False, save_path=None):
         gestures = self.gestures
@@ -137,3 +138,103 @@ class Dataset:
             plt.close()
 
         return mean_gesture
+    
+    def extract_features(gestures):
+        length, time, start_x, start_y, end_x, end_y, area, start_v_x, start_v_y, end_v_x, end_v_y, min_v_x, min_v_y, max_v_x, max_v_y, v_25_x, v_25_y, v_50_x, v_50_y, mean_v_x, mean_v_y, v_75_x, v_75_y = [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [] 
+        features = []
+        for g in gestures:
+            feature = []
+            v_profile_x = []
+            v_profile_y = []
+            l = 0
+            t = 0
+            np_g = np.asarray(g[0])
+            start_x.append(np_g[0][0])
+            feature.append(np_g[0][0])
+            start_y.append(np_g[0][1])
+            feature.append(np_g[0][1])
+            end_x.append(np_g[-1][0])
+            feature.append(np_g[-1][0])
+            end_y.append(np_g[-1][1])
+            feature.append(np_g[-1][1])
+            for i in range(np_g.shape[0]):
+                if i < np_g.shape[0]-1:
+                    v_profile_x.append(np.abs(np_g[i+1][0]-np_g[i][0]))
+                    v_profile_y.append(np.abs(np_g[i+1][1]-np_g[i][1]))
+                    l += eucl_dist(np_g[i][:2], np_g[i+1][:2])
+                #t += np_g[i][2]
+                t += DATA_STEP
+            length.append(l)
+            feature.append(l)
+            time.append(t)
+            feature.append(t)
+            start_v_x.append(v_profile_x[0])
+            feature.append(v_profile_x[0])
+            start_v_y.append(v_profile_y[0])
+            feature.append(v_profile_y[0])
+            end_v_x.append(v_profile_x[-1])
+            feature.append(v_profile_x[-1])
+            end_v_y.append(v_profile_y[-1])
+            feature.append(v_profile_y[-1])
+            min_v_x.append(get_percentile(v_profile_x, 0.0))
+            feature.append(get_percentile(v_profile_x, 0.0))
+            min_v_y.append(get_percentile(v_profile_y, 0.0))
+            feature.append(get_percentile(v_profile_y, 0.0))
+            max_v_x.append(get_percentile(v_profile_x, 1.0))
+            feature.append(get_percentile(v_profile_x, 1.0))
+            max_v_y.append(get_percentile(v_profile_y, 1.0))
+            feature.append(get_percentile(v_profile_y, 1.0))
+            v_25_x.append(get_percentile(v_profile_x, 0.25))
+            feature.append(get_percentile(v_profile_x, 0.25))
+            v_25_y.append(get_percentile(v_profile_y, 0.25))
+            feature.append(get_percentile(v_profile_y, 0.25))
+            v_50_x.append(get_percentile(v_profile_x, 0.50))
+            feature.append(get_percentile(v_profile_x, 0.50))
+            v_50_y.append(get_percentile(v_profile_y, 0.50))
+            feature.append(get_percentile(v_profile_y, 0.50))
+            v_75_x.append(get_percentile(v_profile_x, 0.75))
+            feature.append(get_percentile(v_profile_x, 0.75))
+            v_75_y.append(get_percentile(v_profile_y, 0.75))
+            feature.append(get_percentile(v_profile_y, 0.75))
+            mean_v_x.append(np.mean(v_profile_x))
+            feature.append(np.mean(v_profile_x))
+            mean_v_y.append(np.mean(v_profile_y))
+            feature.append(np.mean(v_profile_y))
+            area.append((np.max(np_g[:,0])-np.min(np_g[:,0]))*(np.max(np_g[:,1])-np.min(np_g[:,1])))
+            feature.append((np.max(np_g[:,0])-np.min(np_g[:,0]))*(np.max(np_g[:,1])-np.min(np_g[:,1])))
+            features.append(feature)
+        #return length, time, start_x, start_y, end_x, end_y, area, start_v_x, start_v_y, end_v_x, end_v_y, min_v_x, min_v_y, max_v_x, max_v_y, v_25_x, v_25_y, v_50_x, v_50_y, mean_v_x, mean_v_y, v_75_x, v_75_y      
+        return features 
+
+    def normalize_gestures(self, d_min, d_max, i_min, i_max):
+        normalized = normalize_data(self.gestures, d_min, d_max, i_min, i_max, self.representation)
+
+        return Dataset(gestures=normalized, classes=self.classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=True, dt=self.dt)
+
+    def pad_gestures(self, num_points=64, value=0):
+        padded = pad_data(self.gestures, num_points, rep=self.representation, value=value)
+
+        return Dataset(gestures=padded, classes=self.classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=True, dt=self.dt)
+
+    def interpolate_gestures(self, dt=0.02):
+        if self.representation == "velocity":
+            raise ValueError("Interpolation for velocity rep not implemented.")
+        if not self.has_timestamps:
+            raise ValueError("Interpolation needs timestamps.")
+        interp = []
+        for gesture in self.gestures:
+            interp.append(interpolate_gesture(gesture, dt))
+        
+        return Dataset(gestures=interp, classes=self.classes, has_timestamps=False, representation=self.representation, interpolated=True, dt=dt)
+
+    def resample_gestures(self, num_points=64):
+        resampled = resample_data(self.gestures, num_points)
+
+        return Dataset(gestures=resampled, classes=self.classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=True, dt=self.dt)
+
+    def to_velocity(self, dt=0.02):
+        if self.representation == "velocity":
+            return self
+        
+        vel_gestures = get_velocity_rep(self.gestures, self.interpolated, dt)
+        return Dataset(gestures=vel_gestures, classes=self.classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=self.interpolated, dt=dt)
