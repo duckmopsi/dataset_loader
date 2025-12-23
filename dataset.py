@@ -67,7 +67,10 @@ class Dataset:
     def get_class(self, idx, ohe=False):
         """idx = class index"""
         if ohe:
-            return self.classes_oh[:, idx]
+            classes_oh = []
+            for sample in self.classes_oh:
+                classes_oh.append(sample[idx])
+            return classes_oh
         else:
             return self.classes[:, idx]
     
