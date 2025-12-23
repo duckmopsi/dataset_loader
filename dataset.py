@@ -80,7 +80,7 @@ class Dataset:
         gestures = [g for g, m in zip(self.gestures, mask) if m]
         classes = self.classes[mask]
 
-        return Dataset(gestures=gestures, classes=classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=True, dt=self.dt)
+        return Dataset(gestures=gestures, classes=classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=True, dt=self.dt, class_dims=self.class_dims)
     
     def mean_gesture(self, mode="time", num_points=64, plot=False, save_path=None):
         gestures = self.gestures
@@ -211,12 +211,12 @@ class Dataset:
     def normalize_gestures(self, d_min, d_max, i_min, i_max):
         normalized = normalize_data(self.gestures, d_min, d_max, i_min, i_max, self.representation)
 
-        return Dataset(gestures=normalized, classes=self.classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=True, dt=self.dt)
+        return Dataset(gestures=normalized, classes=self.classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=True, dt=self.dt, class_dims=self.class_dims)
 
     def pad_gestures(self, num_points=64, value=0):
         padded = pad_data(self.gestures, num_points, rep=self.representation, value=value)
 
-        return Dataset(gestures=padded, classes=self.classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=True, dt=self.dt)
+        return Dataset(gestures=padded, classes=self.classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=True, dt=self.dt, class_dims=self.class_dims)
 
     def interpolate_gestures(self, dt=0.02):
         if self.representation == "velocity":
@@ -227,21 +227,21 @@ class Dataset:
         for gesture in self.gestures:
             interp.append(interpolate_gesture(gesture, dt))
         
-        return Dataset(gestures=interp, classes=self.classes, has_timestamps=False, representation=self.representation, interpolated=True, dt=dt)
+        return Dataset(gestures=interp, classes=self.classes, has_timestamps=False, representation=self.representation, interpolated=True, dt=dt, class_dims=self.class_dims)
 
     def resample_gestures(self, num_points=64):
         resampled = resample_data(self.gestures, num_points)
 
-        return Dataset(gestures=resampled, classes=self.classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=True, dt=self.dt)
+        return Dataset(gestures=resampled, classes=self.classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=True, dt=self.dt, class_dims=self.class_dims)
 
     def remove_first_dimension(self):
         removed = remove_first_dimension(self.gestures)
 
-        return Dataset(gestures=removed, classes=self.classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=self.interpolated, dt=self.dt)
+        return Dataset(gestures=removed, classes=self.classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=self.interpolated, dt=self.dt, class_dims=self.class_dims)
 
     def to_velocity(self, dt=0.02):
         if self.representation == "velocity":
             return self
         
         vel_gestures = get_velocity_rep(self.gestures, self.interpolated, dt)
-        return Dataset(gestures=vel_gestures, classes=self.classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=self.interpolated, dt=dt)
+        return Dataset(gestures=vel_gestures, classes=self.classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=self.interpolated, dt=dt, class_dims=self.class_dims)
