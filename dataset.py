@@ -1,7 +1,7 @@
 import numpy as np
 from .io import load_json
-from .transforms import interpolate_gesture, strip_timestamps, resample_stroke, get_velocity_rep, normalize_data, pad_data, resample_data
-from .utils import get_percentile
+from .transforms import interpolate_gesture, strip_timestamps, resample_stroke, get_velocity_rep, normalize_data, pad_data, resample_data, remove_first_dimension
+from .utils import get_percentile, eucl_dist
 
 class Dataset:
     def __init__(self, gestures, classes, has_timestamps, representation, interpolated=False, dt=None, classes_oh=False, class_dims=None):
@@ -139,10 +139,10 @@ class Dataset:
 
         return mean_gesture
     
-    def extract_features(gestures):
+    def extract_features(self):
         length, time, start_x, start_y, end_x, end_y, area, start_v_x, start_v_y, end_v_x, end_v_y, min_v_x, min_v_y, max_v_x, max_v_y, v_25_x, v_25_y, v_50_x, v_50_y, mean_v_x, mean_v_y, v_75_x, v_75_y = [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [] 
         features = []
-        for g in gestures:
+        for g in self.gestures:
             feature = []
             v_profile_x = []
             v_profile_y = []
@@ -162,8 +162,10 @@ class Dataset:
                     v_profile_x.append(np.abs(np_g[i+1][0]-np_g[i][0]))
                     v_profile_y.append(np.abs(np_g[i+1][1]-np_g[i][1]))
                     l += eucl_dist(np_g[i][:2], np_g[i+1][:2])
-                #t += np_g[i][2]
-                t += DATA_STEP
+                if self.has_timestamps:
+                    t += np_g[i][2]
+                else:
+                    t += self.dt
             length.append(l)
             feature.append(l)
             time.append(t)
@@ -231,6 +233,11 @@ class Dataset:
         resampled = resample_data(self.gestures, num_points)
 
         return Dataset(gestures=resampled, classes=self.classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=True, dt=self.dt)
+
+    def remove_first_dimension(self):
+        removed = remove_first_dimension(self.gestures)
+
+        return Dataset(gestures=removed, classes=self.classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=self.interpolated, dt=self.dt)
 
     def to_velocity(self, dt=0.02):
         if self.representation == "velocity":
