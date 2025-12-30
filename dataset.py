@@ -83,7 +83,7 @@ class Dataset:
         gestures = [g for g, m in zip(self.gestures, mask) if m]
         classes = self.classes[mask]
 
-        return Dataset(gestures=gestures, classes=classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=True, dt=self.dt, class_dims=self.class_dims)
+        return Dataset(gestures=gestures, classes=classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=self.interpolated, dt=self.dt, class_dims=self.class_dims)
     
     def mean_gesture(self, mode="time", num_points=64, plot=False, save_path=None):
         gestures = self.gestures
@@ -160,14 +160,18 @@ class Dataset:
             feature.append(np_g[-1][0])
             end_y.append(np_g[-1][1])
             feature.append(np_g[-1][1])
+            if self.has_timestamps:
+                t = np_g[-1][2]
             for i in range(np_g.shape[0]):
                 if i < np_g.shape[0]-1:
-                    v_profile_x.append(np.abs(np_g[i+1][0]-np_g[i][0]))
-                    v_profile_y.append(np.abs(np_g[i+1][1]-np_g[i][1]))
+                    if self.has_timestamps:
+                        v_profile_x.append(np.abs(np_g[i+1][0]-np_g[i][0])/(np_g[i+1][2] - np_g[i][2]))
+                        v_profile_y.append(np.abs(np_g[i+1][1]-np_g[i][1])/(np_g[i+1][2] - np_g[i][2]))
+                    else:
+                        v_profile_x.append(np.abs(np_g[i+1][0]-np_g[i][0])/self.dt)
+                        v_profile_y.append(np.abs(np_g[i+1][1]-np_g[i][1])/self.dt)
                     l += eucl_dist(np_g[i][:2], np_g[i+1][:2])
-                if self.has_timestamps:
-                    t += np_g[i][2]
-                else:
+                if not self.has_timestamps:
                     t += self.dt
             length.append(l)
             feature.append(l)
