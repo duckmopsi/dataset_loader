@@ -64,12 +64,18 @@ class Dataset:
     def num_classes(self):
         return self.classes.shape[1]
     
-    def get_class(self, idx, ohe=False):
+    def get_class(self, idx, ohe=False, class_dim=None):
         """idx = class index"""
         if ohe:
             classes_oh = []
-            for sample in self.classes_oh:
-                classes_oh.append(sample[idx])
+            if not self.classes_oh is None:
+                for sample in self.classes_oh:
+                    classes_oh.append(sample[idx])
+            else:
+                for sample in self.classes:
+                    vec = np.zeros(class_dim, dtype=int)
+                    vec[sample] = 1
+                    classes_oh.append(vec)
             return classes_oh
         else:
             return self.classes[:, idx]
@@ -218,12 +224,12 @@ class Dataset:
     def normalize_gestures(self, d_min, d_max, i_min, i_max):
         normalized = normalize_data(self.gestures, d_min, d_max, i_min, i_max, self.representation)
 
-        return Dataset(gestures=normalized, classes=self.classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=True, dt=self.dt, class_dims=self.class_dims)
+        return Dataset(gestures=normalized, classes=self.classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=self.interpolated, dt=self.dt, class_dims=self.class_dims)
 
     def pad_gestures(self, num_points=64, value=0):
         padded = pad_data(self.gestures, num_points, rep=self.representation, value=value)
 
-        return Dataset(gestures=padded, classes=self.classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=True, dt=self.dt, class_dims=self.class_dims)
+        return Dataset(gestures=padded, classes=self.classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=False, dt=self.dt, class_dims=self.class_dims)
 
     def interpolate_gestures(self, dt=0.02):
         if self.representation == "velocity":
@@ -239,7 +245,7 @@ class Dataset:
     def resample_gestures(self, num_points=64):
         resampled = resample_data(self.gestures, num_points)
 
-        return Dataset(gestures=resampled, classes=self.classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=True, dt=self.dt, class_dims=self.class_dims)
+        return Dataset(gestures=resampled, classes=self.classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=False, dt=self.dt, class_dims=self.class_dims)
 
     def remove_first_dimension(self):
         removed = remove_first_dimension(self.gestures)

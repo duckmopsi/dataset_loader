@@ -94,7 +94,7 @@ def normalize_data(data, d_min, d_max, i_min, i_max, rep='position'):
                 d[1] = (d[1] - d_min) / (d_max - d_min) * (i_max - i_min) + i_min
     return dd
 
-def pad_data(data, length, rep='position', value=0):
+def pad_data(data, length, value=0):
     new_gestures = []
     for gesture in data:
         new_gesture = []
