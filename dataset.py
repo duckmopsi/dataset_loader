@@ -74,7 +74,7 @@ class Dataset:
             else:
                 for sample in self.classes:
                     vec = np.zeros(class_dim, dtype=int)
-                    vec[sample] = 1
+                    vec[sample[idx]] = 1
                     classes_oh.append(vec)
             return classes_oh
         else:
