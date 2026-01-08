@@ -69,7 +69,7 @@ def get_velocity_rep(gestures, interpolated=False, DATA_STEP=0.02):
             vx = dx/dt
             vy = dy/dt
 
-            if not interpolated:
+            if interpolated:
                 seq = [initial]
                 for i in range(len(dx)):
                     seq.append([vx[i], vy[i]])
