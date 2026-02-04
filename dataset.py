@@ -91,7 +91,7 @@ class Dataset:
 
         return Dataset(gestures=gestures, classes=classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=self.interpolated, dt=self.dt, class_dims=self.class_dims)
     
-    def mean_gesture(self, mode="time", num_points=64, plot=False, save_path=None):
+    def mean_gesture(self, mode="time", num_points=64, plot=False, save_path=None, bounds_x=None, bounds_y=None):
         gestures = self.gestures
         
         max_strokes = max(len(g) for g in gestures)
@@ -140,6 +140,10 @@ class Dataset:
                 plt.plot(stroke[:, 0], stroke[:, 1], linewidth=3)
 
             plt.gca().invert_yaxis()
+            if bounds_x is not None:
+                plt.xlim(-bounds_x, bounds_x)
+            if bounds_y is not None:
+                plt.ylim(-bounds_y, bounds_y)
             if save_path:
                 plt.savefig(save_path)
             else:
