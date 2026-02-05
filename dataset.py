@@ -139,11 +139,11 @@ class Dataset:
             for stroke in mean_gesture:
                 plt.plot(stroke[:, 0], stroke[:, 1], linewidth=3)
 
-            plt.gca().invert_yaxis()
             if bounds_x is not None:
                 plt.xlim(-bounds_x, bounds_x)
             if bounds_y is not None:
                 plt.ylim(-bounds_y, bounds_y)
+            plt.gca().invert_yaxis()
             if save_path:
                 plt.savefig(save_path)
             else:
