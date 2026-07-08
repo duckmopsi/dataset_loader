@@ -1,36 +1,56 @@
 import numpy as np
 from .io_utils import load_json
-from .transforms import interpolate_gesture, strip_timestamps, resample_stroke, get_velocity_rep, normalize_data, pad_data, resample_data, remove_first_dimension
+from .transforms import interpolate_gesture, strip_timestamps, resample_stroke, get_velocity_rep, normalize_data, pad_data, unpad_data, resample_data, integrate_velocity
 from .utils import get_percentile, eucl_dist
 
 class Dataset:
-    def __init__(self, gestures, classes, has_timestamps, representation, interpolated=False, dt=None, classes_oh=False, class_dims=None):
+    def __init__(self, gestures, classes, has_timestamps, representation, padded=False, resampled=False, interpolated=False, pos_normalized=False, velo_normalized=False, dt=None, classes_oh=False, class_dims=None, condition_types=None):
         self.gestures = gestures
         self.has_timestamps = has_timestamps
         self.class_dims = class_dims
+        self.condition_types = condition_types
         self.dt = dt
         self.representation = representation
         self.interpolated = interpolated
+        self.padded = padded
+        self.resampled = resampled
+        self.pos_normalized = pos_normalized
+        self.velo_normalized = velo_normalized
 
         if classes_oh:
             self.classes_oh = classes
-            self.classes = np.asarray([[int(np.argmax(c)) for c in row] for row in self.classes_oh])
+            self.classes = np.asarray([[int(np.argmax(c)) if self.condition_types is None or self.condition_types[i] == "categorical" else c[0] for i, c in enumerate(row)] for row in self.classes_oh])
         else:
             self.classes = np.asarray(classes)
             if class_dims is None:
                 self.classes_oh = None
             else:
+                if condition_types is None:
+                    condition_types = ["categorical"] * len(class_dims)
+
+                if len(condition_types) != len(class_dims):
+                    raise ValueError("condition_types and class_dims must have same length.")
+                
+                self.condition_types = condition_types
                 self.classes_oh = []
                 for sample in self.classes:
                     sample_oh = []
-                    for cls_val, dim in zip(sample, class_dims):
-                        vec = np.zeros(dim, dtype=int)
-                        vec[cls_val] = 1
-                        sample_oh.append(vec)
+                    for cls_val, dim, cond_type in zip(sample, class_dims, condition_types):
+                        if cond_type == "categorical":
+                            vec = np.zeros(dim, dtype=int)
+                            vec[cls_val] = 1.0
+                            sample_oh.append(vec)
+
+                        elif cond_type == "continuous":
+                            sample_oh.append(np.asarray([cls_val], dtype=np.float32))
+
+                        else:
+                            raise ValueError("Unknown condition type: {cond_type}")
+                        
                     self.classes_oh.append(sample_oh)
 
     @classmethod
-    def from_json(cls, path, dt=0.02, drop_timestamps=False, classes_oh=False, class_dims=None):
+    def from_json(cls, path, dt=None, drop_timestamps=False, classes_oh=False, class_dims=None, condition_types=None, min_size=None, max_size=None, min_strokes=None, max_strokes=None):
         raw = load_json(path)
 
         gestures = []
@@ -46,6 +66,29 @@ class Dataset:
             if isinstance(gesture[0][0], (int, float)):
                 gesture = [gesture]
 
+            num_strokes = len(gesture)
+
+            if min_strokes is not None and num_strokes < min_strokes:
+                continue
+
+            if max_strokes is not None and num_strokes > max_strokes:
+                continue
+
+            invalid = False
+
+            for stroke in gesture:
+                stroke_len = len(stroke)
+
+                if min_size is not None and stroke_len < min_size:
+                    invalid = True
+                    break
+                if max_size is not None and stroke_len > max_size:
+                    invalid = True
+                    break
+            
+            if invalid:
+                continue
+        
             if has_timestamps is None:
                 has_timestamps = len(gesture[0][0]) == 3
 
@@ -56,32 +99,45 @@ class Dataset:
             gestures.append(gesture)
             classes.append(cls_vals)
 
-        return cls(gestures=gestures, classes=classes, has_timestamps=has_timestamps, representation="position", dt=dt, classes_oh=classes_oh, class_dims=class_dims)
+        return cls(gestures=gestures, classes=classes, has_timestamps=has_timestamps, representation="position", dt=dt, classes_oh=classes_oh, class_dims=class_dims, condition_types=condition_types, padded=False, resampled=False, interpolated=False, pos_normalized=False, velo_normalized=False)
     
     def __len__(self):
         return len(self.gestures)
     
+    def get_config(self):
+        return {"padded": self.padded, "interpolated": self.interpolated, "resampled": self.resampled, "pos_normalized": self.pos_normalized, "velo_normalized": self.velo_normalized, "dt": self.dt, "representation": self.representation}
+
     def num_classes(self):
         return self.classes.shape[1]
     
     def get_class(self, idx, ohe=False, class_dim=None):
-        """idx = class index"""
         if ohe:
+            if self.classes_oh is not None:
+                return [sample[idx] for sample in self.classes_oh]
+
+            if self.condition_types is not None and self.condition_types[idx] == "continuous":
+                return self.classes[:, idx:idx+1]
+
             classes_oh = []
-            if not self.classes_oh is None:
-                for sample in self.classes_oh:
-                    classes_oh.append(sample[idx])
-            else:
-                for sample in self.classes:
-                    vec = np.zeros(class_dim, dtype=int)
-                    vec[sample[idx]] = 1
-                    classes_oh.append(vec)
+            for sample in self.classes:
+                vec = np.zeros(class_dim, dtype=np.float32)
+                vec[int(sample[idx])] = 1.0
+                classes_oh.append(vec)
+
             return classes_oh
-        else:
-            return self.classes[:, idx]
+
+        return self.classes[:, idx]
     
     def get_gestures(self):
         return self.gestures
+    
+    def get_conditions(self, ohe=False, flatten=True):
+        if ohe and self.classes_oh is not None:
+            if flatten:
+                return np.asarray([np.concatenate(sample, axis=-1) for sample in self.classes_oh])
+            else:
+                return np.asarray(self.classes_oh)
+        return self.classes
     
     def filter_by_class(self, class_idx, value):
         mask = self.classes[:, class_idx] == value
@@ -89,8 +145,38 @@ class Dataset:
         gestures = [g for g, m in zip(self.gestures, mask) if m]
         classes = self.classes[mask]
 
-        return Dataset(gestures=gestures, classes=classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=self.interpolated, dt=self.dt, class_dims=self.class_dims)
+        return Dataset(gestures=gestures, classes=classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=self.interpolated, dt=self.dt, class_dims=self.class_dims, condition_types=self.condition_types, padded=self.padded, resampled=self.resampled, pos_normalized=self.pos_normalized, velo_normalized=self.velo_normalized)
     
+    def filter(self, class_filters=None, keep_condition_indices=None):
+        gestures = self.gestures
+        classes = np.asarray(self.classes)
+
+        if class_filters is not None:
+            mask = np.ones(len(classes), dtype=bool)
+
+            for class_idx, allowed_values in class_filters.items():
+                if self.condition_types is not None and self.condition_types[class_idx] != "categorical":
+                    raise ValueError("class_filters can only be applied to categorical conditions.")
+
+                mask &= np.isin(classes[:, class_idx], allowed_values)
+
+            gestures = [g for g, m in zip(gestures, mask) if m]
+            classes = classes[mask]
+
+        class_dims = self.class_dims
+        condition_types = self.condition_types
+
+        if keep_condition_indices is not None:
+            classes = classes[:, keep_condition_indices]
+
+            if class_dims is not None:
+                class_dims = [class_dims[i] for i in keep_condition_indices]
+
+            if condition_types is not None:
+                condition_types = [condition_types[i] for i in keep_condition_indices]
+
+        return Dataset(gestures=gestures,classes=classes,has_timestamps=self.has_timestamps,representation=self.representation,interpolated=self.interpolated,dt=self.dt,class_dims=class_dims,condition_types=condition_types,padded=self.padded,resampled=self.resampled,pos_normalized=self.pos_normalized,velo_normalized=self.velo_normalized)
+
     def mean_gesture(self, mode="time", num_points=64, plot=False, save_path=None, bounds_x=None, bounds_y=None):
         gestures = self.gestures
         
@@ -228,14 +314,28 @@ class Dataset:
     def normalize_gestures(self, d_min, d_max, i_min, i_max):
         normalized = normalize_data(self.gestures, d_min, d_max, i_min, i_max, self.representation)
 
-        return Dataset(gestures=normalized, classes=self.classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=self.interpolated, dt=self.dt, class_dims=self.class_dims)
+        if self.representation == "position":
+            pos_normalized = True
+            velo_normalized = False
+        else:
+            pos_normalized = self.pos_normalized
+            velo_normalized = True
+
+        return Dataset(gestures=normalized, classes=self.classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=self.interpolated, dt=self.dt, class_dims=self.class_dims, condition_types=self.condition_types, padded=self.padded, resampled=self.resampled, pos_normalized=pos_normalized, velo_normalized=velo_normalized)
 
     def pad_gestures(self, num_points=64, value=0):
-        padded = pad_data(self.gestures, num_points, rep=self.representation, value=value)
+        padded = pad_data(self.gestures, num_points, value=value)
 
-        return Dataset(gestures=padded, classes=self.classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=False, dt=self.dt, class_dims=self.class_dims)
+        return Dataset(gestures=padded, classes=self.classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=self.interpolated, dt=self.dt, class_dims=self.class_dims, condition_types=self.condition_types, padded=True, resampled=self.resampled, pos_normalized=self.pos_normalized, velo_normalized=self.velo_normalized)
+
+    def unpad_gestures(self, pad_value=-1.0):
+        unpadded = unpad_data(self.gestures, pad_value)
+
+        return Dataset(gestures=unpadded, classes=self.classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=self.interpolated, dt=self.dt, class_dims=self.class_dims, condition_types=self.condition_types, padded=False, resampled=self.resampled, pos_normalized=self.pos_normalized, velo_normalized=self.velo_normalized)
 
     def interpolate_gestures(self, dt=0.02):
+        if self.padded:
+            raise ValueError("Cannot interpolate padded data.")
         if self.representation == "velocity":
             raise ValueError("Interpolation for velocity rep not implemented.")
         if not self.has_timestamps:
@@ -244,21 +344,26 @@ class Dataset:
         for gesture in self.gestures:
             interp.append(interpolate_gesture(gesture, dt))
         
-        return Dataset(gestures=interp, classes=self.classes, has_timestamps=False, representation=self.representation, interpolated=True, dt=dt, class_dims=self.class_dims)
+        return Dataset(gestures=interp, classes=self.classes, has_timestamps=False, representation=self.representation, interpolated=True, dt=dt, class_dims=self.class_dims, condition_types=self.condition_types, padded=False, resampled=False, pos_normalized=self.pos_normalized, velo_normalized=self.velo_normalized)
 
     def resample_gestures(self, num_points=64):
         resampled = resample_data(self.gestures, num_points)
 
-        return Dataset(gestures=resampled, classes=self.classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=False, dt=self.dt, class_dims=self.class_dims)
-
-    def remove_first_dimension(self):
-        removed = remove_first_dimension(self.gestures)
-
-        return Dataset(gestures=removed, classes=self.classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=self.interpolated, dt=self.dt, class_dims=self.class_dims)
+        return Dataset(gestures=resampled, classes=self.classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=False, dt=self.dt, class_dims=self.class_dims, condition_types=self.condition_types, padded=False, resampled=True, pos_normalized=self.pos_normalized, velo_normalized=self.velo_normalized)
 
     def to_velocity(self, dt=0.02):
         if self.representation == "velocity":
             return self
         
         vel_gestures = get_velocity_rep(self.gestures, self.interpolated, dt)
-        return Dataset(gestures=vel_gestures, classes=self.classes, has_timestamps=self.has_timestamps, representation=self.representation, interpolated=self.interpolated, dt=dt, class_dims=self.class_dims)
+        return Dataset(gestures=vel_gestures, classes=self.classes, has_timestamps=self.has_timestamps, representation="velocity", interpolated=self.interpolated, dt=dt, class_dims=self.class_dims, condition_types=self.condition_types, padded=self.padded, resampled=self.resampled, pos_normalized=self.pos_normalized, velo_normalized=False)
+    
+    def to_position(self, dt=None):
+        if self.representation == "position":
+            return self
+        
+        if self.velo_normalized:
+            raise ValueError("Denormalize velocity first.")
+        
+        pos_gestures = integrate_velocity(self.gestures, dt)
+        return Dataset(gestures=pos_gestures, classes=self.classes, has_timestamps=self.has_timestamps, representation="position", interpolated=self.interpolated, dt=dt, class_dims=self.class_dims, condition_types=self.condition_types, padded=self.padded, resampled=self.resampled, pos_normalized=self.pos_normalized, velo_normalized=False)
