@@ -18,3 +18,14 @@ def eucl_dist(x, y):
     x_ = y[0]-x[0]
     y_ = y[1]-x[1]
     return np.sqrt(x_*x_ + y_*y_)
+
+def get_statistic_measures(values):
+    return (
+        np.mean(values),
+        np.std(values),
+        np.percentile(values, 0),
+        np.percentile(values, 25),
+        np.percentile(values, 50),
+        np.percentile(values, 75),
+        np.percentile(values, 100)
+    )

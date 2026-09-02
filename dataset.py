@@ -1,7 +1,7 @@
 import numpy as np
 from .io_utils import load_json
 from .transforms import interpolate_gesture, strip_timestamps, resample_stroke, get_velocity_rep, normalize_data, pad_data, unpad_data, resample_data, integrate_velocity
-from .utils import get_percentile, eucl_dist
+from .utils import get_percentile, eucl_dist, get_statistic_measures
 
 class Dataset:
     def __init__(self, gestures, classes, has_timestamps, representation, padded=False, resampled=False, interpolated=False, pos_normalized=False, velo_normalized=False, dt=None, classes_oh=False, class_dims=None, condition_types=None):
@@ -239,77 +239,192 @@ class Dataset:
         return mean_gesture
     
     def extract_features(self):
-        length, time, start_x, start_y, end_x, end_y, area, start_v_x, start_v_y, end_v_x, end_v_y, min_v_x, min_v_y, max_v_x, max_v_y, v_25_x, v_25_y, v_50_x, v_50_y, mean_v_x, mean_v_y, v_75_x, v_75_y = [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [] 
-        features = []
-        for g in self.gestures:
-            feature = []
-            v_profile_x = []
-            v_profile_y = []
-            l = 0
-            t = 0
-            np_g = np.asarray(g[0])
-            start_x.append(np_g[0][0])
-            feature.append(np_g[0][0])
-            start_y.append(np_g[0][1])
-            feature.append(np_g[0][1])
-            end_x.append(np_g[-1][0])
-            feature.append(np_g[-1][0])
-            end_y.append(np_g[-1][1])
-            feature.append(np_g[-1][1])
-            if self.has_timestamps:
-                t = np_g[-1][2]
-            for i in range(np_g.shape[0]):
-                if i < np_g.shape[0]-1:
-                    if self.has_timestamps:
-                        v_profile_x.append(np.abs(np_g[i+1][0]-np_g[i][0])/(np_g[i+1][2] - np_g[i][2]))
-                        v_profile_y.append(np.abs(np_g[i+1][1]-np_g[i][1])/(np_g[i+1][2] - np_g[i][2]))
-                    else:
-                        v_profile_x.append(np.abs(np_g[i+1][0]-np_g[i][0])/self.dt)
-                        v_profile_y.append(np.abs(np_g[i+1][1]-np_g[i][1])/self.dt)
-                    l += eucl_dist(np_g[i][:2], np_g[i+1][:2])
-                if not self.has_timestamps:
-                    t += self.dt
-            length.append(l)
-            feature.append(l)
-            time.append(t)
-            feature.append(t)
-            start_v_x.append(v_profile_x[0])
-            feature.append(v_profile_x[0])
-            start_v_y.append(v_profile_y[0])
-            feature.append(v_profile_y[0])
-            end_v_x.append(v_profile_x[-1])
-            feature.append(v_profile_x[-1])
-            end_v_y.append(v_profile_y[-1])
-            feature.append(v_profile_y[-1])
-            min_v_x.append(get_percentile(v_profile_x, 0.0))
-            feature.append(get_percentile(v_profile_x, 0.0))
-            min_v_y.append(get_percentile(v_profile_y, 0.0))
-            feature.append(get_percentile(v_profile_y, 0.0))
-            max_v_x.append(get_percentile(v_profile_x, 1.0))
-            feature.append(get_percentile(v_profile_x, 1.0))
-            max_v_y.append(get_percentile(v_profile_y, 1.0))
-            feature.append(get_percentile(v_profile_y, 1.0))
-            v_25_x.append(get_percentile(v_profile_x, 0.25))
-            feature.append(get_percentile(v_profile_x, 0.25))
-            v_25_y.append(get_percentile(v_profile_y, 0.25))
-            feature.append(get_percentile(v_profile_y, 0.25))
-            v_50_x.append(get_percentile(v_profile_x, 0.50))
-            feature.append(get_percentile(v_profile_x, 0.50))
-            v_50_y.append(get_percentile(v_profile_y, 0.50))
-            feature.append(get_percentile(v_profile_y, 0.50))
-            v_75_x.append(get_percentile(v_profile_x, 0.75))
-            feature.append(get_percentile(v_profile_x, 0.75))
-            v_75_y.append(get_percentile(v_profile_y, 0.75))
-            feature.append(get_percentile(v_profile_y, 0.75))
-            mean_v_x.append(np.mean(v_profile_x))
-            feature.append(np.mean(v_profile_x))
-            mean_v_y.append(np.mean(v_profile_y))
-            feature.append(np.mean(v_profile_y))
-            area.append((np.max(np_g[:,0])-np.min(np_g[:,0]))*(np.max(np_g[:,1])-np.min(np_g[:,1])))
-            feature.append((np.max(np_g[:,0])-np.min(np_g[:,0]))*(np.max(np_g[:,1])-np.min(np_g[:,1])))
-            features.append(feature)
-        #return length, time, start_x, start_y, end_x, end_y, area, start_v_x, start_v_y, end_v_x, end_v_y, min_v_x, min_v_y, max_v_x, max_v_y, v_25_x, v_25_y, v_50_x, v_50_y, mean_v_x, mean_v_y, v_75_x, v_75_y      
-        return features 
+
+        stroke_features = []
+        gesture_features = []
+
+        for gesture_idx, g in enumerate(self.gestures):
+
+            min_x = np.inf
+            min_y = np.inf
+            max_x = -np.inf
+            max_y = -np.inf
+
+            time = 0.0
+            length = 0.0
+            valid_strokes = 0
+
+            for stroke_idx, stroke in enumerate(g):
+                stroke = np.asarray(stroke, dtype=float)
+
+                if stroke.shape[0] < 3:
+                    continue
+
+                valid_strokes += 1
+
+                # gesture bounding box
+
+                min_x = min(min_x, np.min(stroke[:, 0]))
+                min_y = min(min_y, np.min(stroke[:, 1]))
+                max_x = max(max_x, np.max(stroke[:, 0]))
+                max_y = max(max_y, np.max(stroke[:, 1]))
+
+                # start- & endpoint
+
+                S_x = stroke[0, 0]
+                S_y = stroke[0, 1]
+                E_x = stroke[-1, 0]
+                E_y = stroke[-1, 1]
+
+                # position differences
+
+                dx = np.diff(stroke[:, 0])
+                dy = np.diff(stroke[:, 1])
+
+                distances = np.sqrt(dx ** 2 + dy ** 2)
+                length += np.sum(distances)
+
+                # time differences
+
+                if self.has_timestamps:
+                    timestamps = stroke[:, 2]
+                    raw_time_diff = np.diff(timestamps)
+
+                    # duration
+
+                    time += (timestamps[-1] - timestamps[0])
+
+                else:
+
+                    raw_time_diff = np.full(stroke.shape[0] - 1, self.dt, dtype=float)
+
+                    time += (stroke.shape[0] - 1) * self.dt
+
+                # velocity
+
+                distances_x = np.abs(dx / raw_time_diff)
+                distances_y = np.abs(dy / raw_time_diff)
+
+                # acceleration
+                if len(distances_x) > 0:
+                    acceleration_x = (np.abs(np.diff(np.concatenate(([0.0], distances_x)))) / raw_time_diff)
+                    acceleration_y = (np.abs(np.diff(np.concatenate(([0.0], distances_y)))) / raw_time_diff)
+
+                    v_x = get_statistic_measures(distances_x)
+                    v_y = get_statistic_measures(distances_y)
+                    a_x = get_statistic_measures(acceleration_x)
+                    a_y = get_statistic_measures(acceleration_y)
+
+                else:
+                    v_x = [np.nan] * 7
+                    v_y = [np.nan] * 7
+                    a_x = [np.nan] * 7
+                    a_y = [np.nan] * 7
+
+                # orientation
+
+                moving = (np.isfinite(distances) & (distances > 0))
+                theta = np.arctan2(dy[moving], dx[moving])
+
+                if len(theta) > 0:
+                    orientations_x = np.cos(theta)
+                    orientations_y = np.sin(theta)
+                    alpha_x = get_statistic_measures(orientations_x)
+                    alpha_y = get_statistic_measures(orientations_y)
+
+                    # mrl
+
+                    mrl = np.abs(np.sum(np.exp(1j * theta)) / len(theta))
+
+                else:
+                    alpha_x = [np.nan] * 7
+                    alpha_y = [np.nan] * 7
+                    mrl = np.nan
+
+                stroke_feature = {
+                    "gesture_idx": gesture_idx,
+                    "stroke_idx": stroke_idx,
+                    "S_x": S_x,
+                    "S_y": S_y,
+                    "E_x": E_x,
+                    "E_y": E_y,
+
+                    "mrl": mrl,
+
+                    "v_x_mean": v_x[0],
+                    "v_x_std": v_x[1],
+                    "v_x_min": v_x[2],
+                    "v_x_25": v_x[3],
+                    "v_x_median": v_x[4],
+                    "v_x_75": v_x[5],
+                    "v_x_max": v_x[6],
+
+                    "v_y_mean": v_y[0],
+                    "v_y_std": v_y[1],
+                    "v_y_min": v_y[2],
+                    "v_y_25": v_y[3],
+                    "v_y_median": v_y[4],
+                    "v_y_75": v_y[5],
+                    "v_y_max": v_y[6],
+
+                    "a_x_mean": a_x[0],
+                    "a_x_std": a_x[1],
+                    "a_x_min": a_x[2],
+                    "a_x_25": a_x[3],
+                    "a_x_median": a_x[4],
+                    "a_x_75": a_x[5],
+                    "a_x_max": a_x[6],
+
+                    "a_y_mean": a_y[0],
+                    "a_y_std": a_y[1],
+                    "a_y_min": a_y[2],
+                    "a_y_25": a_y[3],
+                    "a_y_median": a_y[4],
+                    "a_y_75": a_y[5],
+                    "a_y_max": a_y[6],
+
+                    "alpha_x_mean": alpha_x[0],
+                    "alpha_x_std": alpha_x[1],
+                    "alpha_x_min": alpha_x[2],
+                    "alpha_x_25": alpha_x[3],
+                    "alpha_x_median": alpha_x[4],
+                    "alpha_x_75": alpha_x[5],
+                    "alpha_x_max": alpha_x[6],
+
+                    "alpha_y_mean": alpha_y[0],
+                    "alpha_y_std": alpha_y[1],
+                    "alpha_y_min": alpha_y[2],
+                    "alpha_y_25": alpha_y[3],
+                    "alpha_y_median": alpha_y[4],
+                    "alpha_y_75": alpha_y[5],
+                    "alpha_y_max": alpha_y[6],
+                }
+
+                stroke_features.append(stroke_feature)
+
+            # gesture level features
+
+            if valid_strokes > 0:
+                area = ((max_x - min_x) * (max_y - min_y))
+
+            else:
+                area = np.nan
+                time = np.nan
+                length = np.nan
+
+            gesture_features.append(
+                {
+                    "gesture_idx": gesture_idx,
+                    "l": length,
+                    "t": time,
+                    "A": area
+                }
+            )
+
+        return {
+            "gesture_features": gesture_features,
+            "stroke_features": stroke_features
+        }
 
     def normalize_gestures(self, d_min, d_max, i_min, i_max):
         normalized = normalize_data(self.gestures, d_min, d_max, i_min, i_max, self.representation)
