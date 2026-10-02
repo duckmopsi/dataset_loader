@@ -3,7 +3,7 @@ import numpy as np
 def get_percentile(arr, p):
     arr = np.sort(arr)
     l = arr.shape[0]
-    rank = p*(l-1)
+    rank = p * (l - 1)
     lower_idx = int(np.floor(rank))
     higher_idx = int(np.ceil(rank))
   
@@ -15,17 +15,9 @@ def get_percentile(arr, p):
         return lower_val + (higher_val - lower_val) * (rank - lower_idx)
   
 def eucl_dist(x, y):
-    x_ = y[0]-x[0]
-    y_ = y[1]-x[1]
+    x_ = y[0] - x[0]
+    y_ = y[1] - x[1]
     return np.sqrt(x_*x_ + y_*y_)
 
 def get_statistic_measures(values):
-    return (
-        np.mean(values),
-        np.std(values),
-        np.percentile(values, 0),
-        np.percentile(values, 25),
-        np.percentile(values, 50),
-        np.percentile(values, 75),
-        np.percentile(values, 100)
-    )
+    return np.mean(values), np.std(values), np.percentile(values, 0), np.percentile(values, 25), np.percentile(values, 50), np.percentile(values, 75), np.percentile(values, 100)

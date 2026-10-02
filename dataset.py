@@ -1,7 +1,8 @@
 import numpy as np
+
 from .io_utils import load_json
 from .transforms import interpolate_gesture, strip_timestamps, resample_stroke, get_velocity_rep, normalize_data, pad_data, unpad_data, resample_data, integrate_velocity
-from .utils import get_percentile, eucl_dist, get_statistic_measures
+from .utils import get_statistic_measures
 
 class Dataset:
     def __init__(self, gestures, classes, has_timestamps, representation, padded=False, resampled=False, interpolated=False, pos_normalized=False, velo_normalized=False, dt=None, classes_oh=False, class_dims=None, condition_types=None):
@@ -38,14 +39,14 @@ class Dataset:
                     for cls_val, dim, cond_type in zip(sample, class_dims, condition_types):
                         if cond_type == "categorical":
                             vec = np.zeros(dim, dtype=int)
-                            vec[cls_val] = 1.0
+                            vec[int(cls_val)] = 1.0
                             sample_oh.append(vec)
 
                         elif cond_type == "continuous":
                             sample_oh.append(np.asarray([cls_val], dtype=np.float32))
 
                         else:
-                            raise ValueError("Unknown condition type: {cond_type}")
+                            raise ValueError(f"Unknown condition type: {cond_type}")
                         
                     self.classes_oh.append(sample_oh)
 
@@ -89,15 +90,21 @@ class Dataset:
             if invalid:
                 continue
         
+            gesture_has_timestamps = len(gesture[0][0]) == 3
+
             if has_timestamps is None:
-                has_timestamps = len(gesture[0][0]) == 3
+                has_timestamps = gesture_has_timestamps
+            elif has_timestamps != gesture_has_timestamps:
+                raise ValueError("Dataset contains a mixture of timestamped and non-timestamped gestures.")
 
             if drop_timestamps and has_timestamps:
                 gesture = strip_timestamps(gesture)
-                has_timestamps = False
             
             gestures.append(gesture)
             classes.append(cls_vals)
+
+        if drop_timestamps and has_timestamps:
+            has_timestamps = False
 
         return cls(gestures=gestures, classes=classes, has_timestamps=has_timestamps, representation="position", dt=dt, classes_oh=classes_oh, class_dims=class_dims, condition_types=condition_types, padded=False, resampled=False, interpolated=False, pos_normalized=False, velo_normalized=False)
     
@@ -239,6 +246,9 @@ class Dataset:
         return mean_gesture
     
     def extract_features(self):
+
+        if not self.has_timestamps and self.dt is None:
+            raise ValueError("dt must be set when extracting temporal features without timestamps.")
 
         stroke_features = []
         gesture_features = []

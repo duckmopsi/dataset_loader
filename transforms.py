@@ -1,6 +1,7 @@
 import numpy as np
-from scipy.interpolate import interp1d
 import copy
+
+from scipy.interpolate import interp1d
 
 def interpolate_stroke(stroke, dt):
     stroke = np.asarray(stroke)
@@ -62,7 +63,7 @@ def resample_stroke(stroke, num_points):
 def strip_timestamps(gesture):
     return [[[p[0], p[1]] for p in stroke] for stroke in gesture]
 
-def get_velocity_rep(gestures, interpolated=False, DATA_STEP=0.02):
+def get_velocity_rep(gestures, interpolated=False, data_step=0.02):
     """
     Convert position sequences to velocity representation.
     """
@@ -77,7 +78,8 @@ def get_velocity_rep(gestures, interpolated=False, DATA_STEP=0.02):
                 t = [p[2] for p in stroke]
                 dt = np.diff(np.asarray(t))
             else:
-                dt = DATA_STEP
+                t = None
+                dt = data_step
 
             dx = np.diff(np.asarray(x))
             dy = np.diff(np.asarray(y))
@@ -85,16 +87,17 @@ def get_velocity_rep(gestures, interpolated=False, DATA_STEP=0.02):
             vx = dx/dt
             vy = dy/dt
 
-            if interpolated:
+            if interpolated or t is None:
                 seq = [initial]
                 for i in range(len(dx)):
                     seq.append([vx[i], vy[i]])
             else:
                 seq = [[initial[0], initial[1], 0]]
                 for i in range(len(dx)):
-                    seq.append([vx[i], vy[i], t[i+1]])
+                    seq.append([vx[i], vy[i], t[i + 1]])
             new_rep.append(seq)
         velo_rep.append(new_rep)
+        
     return velo_rep
 
 def integrate_velocity(gestures, dt=None):
@@ -124,13 +127,13 @@ def integrate_velocity_stroke(stroke, dt=None):
 
     x0 = stroke[0][0]
     y0 = stroke[0][1]
-    x = np.zeros(len(vx)+1).tolist() if not dt else [0]
-    y = np.zeros(len(vy)+1).tolist() if not dt else [0]
+    x = np.zeros(len(vx) + 1).tolist() if dt is None else [0]
+    y = np.zeros(len(vy) + 1).tolist() if dt is None else [0]
     
     x[0] = x0
     y[0] = y0
     
-    if dt:
+    if dt is not None:
         x.extend(np.cumsum(vx, axis=-1)*dt + x0)
         y.extend(np.cumsum(vy, axis=-1)*dt + y0)
     
@@ -155,7 +158,7 @@ def normalize_data(data, d_min, d_max, i_min, i_max, rep='position'):
         data: Gesture sequences
         d_min, d_max: Original data range
         i_min, i_max: Target interval
-        representation: Representation type
+        rep: Representation type
     
     Returns:
         Normalized data copy
@@ -203,7 +206,7 @@ def unpad_data(data, pad_value=-1.0):
 
     Args:
         data: Padded data sequences
-        pad_value: Value used for padding
+        pad_value: Threshold below which samples are considered padding
 
     Returns:
         List of unpadded data
@@ -222,7 +225,7 @@ def unpad_data_stroke(stroke, pad_value=-1.0):
     new_stroke = []
 
     for xy in stroke:
-        if xy[0] < pad_value or xy[1] < pad_value:
+        if xy[0] <= pad_value or xy[1] <= pad_value:
             break
         new_stroke.append(xy)
 
