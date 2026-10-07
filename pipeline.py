@@ -1,11 +1,15 @@
 def build_dataset_pipeline(dataset, representation="position", mode="resample", num_points=64, 
-                           dt=0.02, normalize=False, pos_bounds=None, velo_bounds=None, pad_value=-1.0):
+                           dt=0.02, normalize=False, pos_bounds=None, velo_bounds=None, pad_value=-1.0, 
+                           min_size=None, max_size=None):
     if normalize:
         d_min, d_max, i_min, i_max = pos_bounds
         dataset = dataset.normalize_gestures(d_min, d_max, i_min, i_max)
     
     if mode == "interpolate":
         dataset = dataset.interpolate_gestures(dt=dt)
+        
+        dataset = dataset.filter_by_size(min_size=min_size, max_size=max_size)
+        
         if representation == "velocity":
             dataset = dataset.to_velocity(dt=dt)
             if normalize:
@@ -14,6 +18,7 @@ def build_dataset_pipeline(dataset, representation="position", mode="resample", 
         dataset = dataset.pad_gestures(num_points=num_points, value=pad_value)
     elif mode == "resample":
         dataset = dataset.resample_gestures(num_points=num_points)
+        
         if representation == "velocity":
             dataset = dataset.to_velocity(dt=dt)
             if normalize:

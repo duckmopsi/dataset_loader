@@ -492,3 +492,50 @@ class Dataset:
         
         pos_gestures = integrate_velocity(self.gestures, dt)
         return Dataset(gestures=pos_gestures, classes=self.classes, has_timestamps=self.has_timestamps, representation="position", interpolated=self.interpolated, dt=dt, class_dims=self.class_dims, condition_types=self.condition_types, padded=self.padded, resampled=self.resampled, pos_normalized=self.pos_normalized, velo_normalized=False)
+
+    def filter_by_size(self, min_size=None, max_size=None):
+        if min_size is None and max_size is None:
+            return self
+
+        mask = []
+
+        for gesture in self.gestures:
+            valid = True
+
+            for stroke in gesture:
+                stroke_len = len(stroke)
+
+                if min_size is not None and stroke_len < min_size:
+                    valid = False
+                    break
+
+                if max_size is not None and stroke_len > max_size:
+                    valid = False
+                    break
+
+            mask.append(valid)
+
+        mask = np.asarray(mask, dtype=bool)
+
+        gestures = [
+            gesture
+            for gesture, keep in zip(self.gestures, mask)
+            if keep
+        ]
+
+        classes = self.classes[mask]
+
+        return Dataset(
+            gestures=gestures,
+            classes=classes,
+            has_timestamps=self.has_timestamps,
+            representation=self.representation,
+            interpolated=self.interpolated,
+            dt=self.dt,
+            class_dims=self.class_dims,
+            condition_types=self.condition_types,
+            padded=self.padded,
+            resampled=self.resampled,
+            pos_normalized=self.pos_normalized,
+            velo_normalized=self.velo_normalized,
+        )
