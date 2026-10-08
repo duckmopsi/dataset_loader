@@ -539,3 +539,57 @@ class Dataset:
             pos_normalized=self.pos_normalized,
             velo_normalized=self.velo_normalized,
         )
+
+    def normalize_timestamps(self, d_min, d_max, i_min, i_max):
+        if not self.has_timestamps:
+            raise ValueError(
+                "Cannot normalize timestamps: dataset has no timestamps."
+            )
+
+        if d_max == d_min:
+            raise ValueError(
+                "Timestamp normalization requires d_max != d_min."
+            )
+
+        normalized = []
+
+        for gesture in self.gestures:
+            normalized_gesture = []
+
+            for stroke in gesture:
+                stroke = np.asarray(
+                    stroke,
+                    dtype=np.float32
+                ).copy()
+
+                if stroke.ndim != 2 or stroke.shape[1] < 3:
+                    raise ValueError(
+                        "Timestamped strokes must contain at least "
+                        "three features: (x, y, t)."
+                    )
+
+                stroke[:, 2] = (
+                    (stroke[:, 2] - d_min)
+                    / (d_max - d_min)
+                    * (i_max - i_min)
+                    + i_min
+                )
+
+                normalized_gesture.append(stroke)
+
+            normalized.append(normalized_gesture)
+
+        return Dataset(
+            gestures=normalized,
+            classes=self.classes,
+            has_timestamps=self.has_timestamps,
+            representation=self.representation,
+            interpolated=self.interpolated,
+            dt=self.dt,
+            class_dims=self.class_dims,
+            condition_types=self.condition_types,
+            padded=self.padded,
+            resampled=self.resampled,
+            pos_normalized=self.pos_normalized,
+            velo_normalized=self.velo_normalized,
+        )
