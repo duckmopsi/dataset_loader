@@ -8,7 +8,7 @@ def build_dataset_pipeline(dataset, representation="position", mode="resample", 
     if mode == "interpolate":
         dataset = dataset.interpolate_gestures(dt=dt)
         
-        dataset = dataset.filter_by_size(min_size=min_size, max_size=max_size)
+        dataset = dataset.filter_by_size(min_size=min_size, max_size=num_points)
         
         if representation == "velocity":
             dataset = dataset.to_velocity(dt=dt)
