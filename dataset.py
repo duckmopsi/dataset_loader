@@ -245,7 +245,14 @@ class Dataset:
 
         return mean_gesture
     
-    def extract_features(self):
+    def extract_features(self, mode="legacy", **kwargs):
+
+        if mode == "statistical":
+            from .statistical_features import extract_statistical_features
+            return extract_statistical_features(self, **kwargs)
+
+        if mode != "legacy":
+            raise ValueError(f"Unknown feature extraction mode: {mode}")
 
         if not self.has_timestamps and self.dt is None:
             raise ValueError("dt must be set when extracting temporal features without timestamps.")
