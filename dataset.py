@@ -1,7 +1,7 @@
 import numpy as np
 
 from .io_utils import load_json
-from .transforms import interpolate_gesture, strip_timestamps, resample_stroke, get_velocity_rep, normalize_data, pad_data, unpad_data, resample_data, integrate_velocity
+from .transforms import interpolate_gesture, strip_timestamps, resample_stroke, get_velocity_rep, normalize_data, pad_data, unpad_data, resample_data, integrate_velocity, clean_dataset_timestamps
 from .utils import get_statistic_measures
 
 class Dataset:
@@ -17,6 +17,7 @@ class Dataset:
         self.resampled = resampled
         self.pos_normalized = pos_normalized
         self.velo_normalized = velo_normalized
+        self.timestamp_cleaning_report = None
 
         if classes_oh:
             self.classes_oh = classes
@@ -244,12 +245,22 @@ class Dataset:
             plt.close()
 
         return mean_gesture
+
+    def clean_timestamps(self, on_conflict="last", viewport_indices=None, warn=True, return_report=False):
+        return clean_dataset_timestamps(self, on_conflict=on_conflict, viewport_indices=viewport_indices, warn=warn, return_report=return_report)
     
     def extract_features(self, mode="legacy", **kwargs):
 
         if mode == "statistical":
-            from .statistical_features import extract_statistical_features
-            return extract_statistical_features(self, **kwargs)
+            if not hasattr(self, "timestamp_cleaning_report"):
+                raise ValueError("Call clean_timestamps() first.")
+
+            result = self.extract_features(mode="legacy")
+
+            if self.timestamp_cleaning_report is not None:
+                result["timestamp_qc"] = self.timestamp_cleaning_report["gesture_flags"]
+            
+            return result
 
         if mode != "legacy":
             raise ValueError(f"Unknown feature extraction mode: {mode}")

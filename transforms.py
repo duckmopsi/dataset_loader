@@ -1,5 +1,7 @@
 import numpy as np
 import copy
+import warnings
+from collections import Counter
 
 from scipy.interpolate import interp1d
 
@@ -249,3 +251,208 @@ def add_first_dimension(data):
     Adds a singleton dimension to gesture arrays. (i.e. (N, T, D) -> (N, 1, T, D))
     """
     return np.asarray([[d] for d in data])
+
+def clean_dataset_timestamps(dataset, *, on_conflict="last", viewport_indices=None,
+                             warn=True, return_report=False):
+    """Return an independent Dataset with strictly increasing intra-stroke times.
+
+    Parameters
+    ----------
+    dataset : Dataset
+        Timestamped position Dataset, NOT velocity representation or padded.
+    on_conflict : {'last', 'first', 'mean', 'error'}
+        When multiple different positions have the same timestamp, select
+        last / first / mean position, or reject the dataset with an error.
+        The default 'last' is an explicit deterministic convention, NOT
+        a recovery of the unknown true timing of these points.
+    viewport_indices : tuple[int, int] | None
+        Indices of viewport_width and viewport_height in dataset.classes.
+        Only needed for reporting conflict jumps in CSS pixels. Coordinates
+        themselves remain in the original input units.
+    warn : bool
+        Emit one summary warning when conflicting-position timestamps exist.
+    return_report : bool
+        True: return (cleaned_dataset, report). False: return cleaned_dataset.
+        The report is always attached at cleaned_dataset.timestamp_cleaning_report.
+
+    No input data are modified. All labels and Dataset configuration flags
+    are retained. No automatic distance threshold or exclusion is applied.
+    """
+
+    _CONFLICT_POLICIES = {"last", "first", "mean", "error"}
+
+    if on_conflict not in _CONFLICT_POLICIES:
+        raise ValueError(f"on_conflict must be one of {sorted(_CONFLICT_POLICIES)}")
+    if not dataset.has_timestamps or dataset.representation != "position":
+        raise ValueError("Timestamp cleanup requires timestamped position (x, y, t) data")
+    if dataset.padded:
+        raise ValueError("Timestamp cleanup cannot operate on padded data")
+    if viewport_indices is not None:
+        if len(viewport_indices) != 2:
+            raise ValueError("viewport_indices must be a pair of condition indices")
+        vw_idx, vh_idx = viewport_indices
+    else:
+        vw_idx, vh_idx = None, None
+
+    output_gestures = []
+    totals = Counter()
+    affected_strokes = []
+    gesture_flags = []
+
+    for gesture_idx, gesture in enumerate(dataset.gestures):
+        new_gesture = []
+        gesture_conflicts = False
+        gesture_short = False
+        gesture_max_jump = 0.0
+        gesture_duplicate_pairs = 0
+        gesture_moving_pairs = 0
+
+        if viewport_indices is not None:
+            vw = float(dataset.classes[gesture_idx, vw_idx])
+            vh = float(dataset.classes[gesture_idx, vh_idx])
+            if not np.isfinite(vw) or not np.isfinite(vh) or vw <= 0 or vh <= 0:
+                raise ValueError(f"Invalid viewport dimensions at gesture {gesture_idx}")
+            scales = np.array([vw, vh], dtype=float)
+        else:
+            scales = np.ones(2, dtype=float)
+
+        for stroke_idx, stroke in enumerate(gesture):
+            points = np.asarray(stroke, dtype=float)
+            if points.ndim != 2 or points.shape[1] != 3:
+                raise ValueError(f"Malformed XYT stroke at gesture {gesture_idx}, stroke {stroke_idx}")
+            if not np.all(np.isfinite(points)):
+                raise ValueError(f"Non-finite XYT data at gesture {gesture_idx}, stroke {stroke_idx}")
+            if len(points) > 1 and np.any(np.diff(points[:, 2]) < 0):
+                raise ValueError(f"Decreasing timestamps at gesture {gesture_idx}, stroke {stroke_idx}")
+
+            totals["strokes"] += 1
+            totals["original_points"] += len(points)
+            clean_points = []
+            ident_pairs = 0
+            conflicting_pairs = 0
+            conflicting_groups = 0
+            max_jump = 0.0
+            group_count = 0
+
+            i = 0
+            while i < len(points):
+                j = i + 1
+                while j < len(points) and points[j, 2] == points[i, 2]:
+                    j += 1
+                block = points[i:j]
+                group_count += 1
+
+                if len(block) > 1:
+                    steps = np.diff(block[:, :2], axis=0)
+                    step_norms = np.linalg.norm(steps * scales, axis=1)
+                    movement = step_norms > 0
+                    conflicting_pairs += int(np.count_nonzero(movement))
+                    ident_pairs += int(np.count_nonzero(~movement))
+                    if np.any(movement):
+                        conflicting_groups += 1
+                        max_jump = max(max_jump, float(step_norms.max()))
+                        if on_conflict == "error":
+                            raise ValueError(
+                                f"Different positions at the same timestamp in "
+                                f"gesture {gesture_idx}, stroke {stroke_idx}, time {points[i, 2]}"
+                            )
+
+                if on_conflict == "first":
+                    representative = block[0].copy()
+                elif on_conflict == "mean":
+                    representative = block[0].copy()
+                    representative[:2] = np.mean(block[:, :2], axis=0)
+                else:  # 'last' and 'error' (when no conflicts)
+                    representative = block[-1].copy()
+                clean_points.append(representative.tolist())
+                i = j
+
+            new_gesture.append(clean_points)
+            removed = len(points) - len(clean_points)
+            totals["removed_points"] += removed
+            totals["identical_pairs"] += ident_pairs
+            totals["conflicting_pairs"] += conflicting_pairs
+            totals["conflicting_groups"] += conflicting_groups
+            totals["cleaned_points"] += len(clean_points)
+            if removed:
+                totals["affected_strokes"] += 1
+            if conflicting_groups:
+                totals["conflicted_strokes"] += 1
+                gesture_conflicts = True
+            if len(clean_points) < 3:
+                totals["strokes_with_fewer_than_3_unique_times"] += 1
+                gesture_short = True
+            gesture_max_jump = max(gesture_max_jump, max_jump)
+            gesture_duplicate_pairs += removed
+            gesture_moving_pairs += conflicting_pairs
+
+            if removed or len(clean_points) < 3:
+                affected_strokes.append({
+                    "gesture_idx": gesture_idx,
+                    "stroke_idx": stroke_idx,
+                    "points_before": len(points),
+                    "points_after": len(clean_points),
+                    "identical_pairs": ident_pairs,
+                    "conflicting_pairs": conflicting_pairs,
+                    "conflicting_groups": conflicting_groups,
+                    "max_conflict_jump": max_jump,
+                })
+
+        output_gestures.append(new_gesture)
+        gesture_flags.append({
+            "gesture_idx": gesture_idx,
+            "had_duplicate_timestamps": gesture_duplicate_pairs > 0,
+            "had_conflicting_positions": gesture_conflicts,
+            "has_short_stroke_after_cleanup": gesture_short,
+            "removed_points": gesture_duplicate_pairs,
+            "conflicting_pairs": gesture_moving_pairs,
+            "max_conflict_jump": gesture_max_jump,
+        })
+        if gesture_conflicts:
+            totals["conflicted_gestures"] += 1
+        if gesture_duplicate_pairs:
+            totals["affected_gestures"] += 1
+
+    totals["gestures"] = len(output_gestures)
+    report = {
+        "method": "group_consecutive_equal_timestamps",
+        "on_conflict": on_conflict,
+        "jump_unit": "css_px" if viewport_indices is not None else "input_coordinate_units",
+        "summary": dict(totals),
+        "affected_strokes": affected_strokes,
+        "gesture_flags": gesture_flags,
+    }
+
+    cleaned = type(dataset)(
+        gestures=output_gestures,
+        classes=np.asarray(dataset.classes).copy(),
+        has_timestamps=dataset.has_timestamps,
+        representation=dataset.representation,
+        padded=dataset.padded,
+        resampled=dataset.resampled,
+        interpolated=dataset.interpolated,
+        pos_normalized=dataset.pos_normalized,
+        velo_normalized=dataset.velo_normalized,
+        dt=dataset.dt,
+        classes_oh=False,
+        class_dims=copy.deepcopy(dataset.class_dims),
+        condition_types=copy.deepcopy(dataset.condition_types),
+    )
+    # Preserve any externally supplied one-hot encoding when the constructor
+    # cannot rebuild it (e.g. class_dims=None).
+    if getattr(dataset, "classes_oh", None) is not None and cleaned.classes_oh is None:
+        cleaned.classes_oh = copy.deepcopy(dataset.classes_oh)
+    cleaned.timestamp_cleaning_report = report
+
+    if warn and totals["conflicting_groups"]:
+        warnings.warn(
+            f"Timestamp cleanup found {totals['conflicting_groups']} groups with "
+            f"different positions at the same time in "
+            f"{totals['conflicted_gestures']} gestures. "
+            f"Applied on_conflict={on_conflict!r}; review "
+            "cleaned.timestamp_cleaning_report before statistical inference.",
+            RuntimeWarning, stacklevel=2,
+        )
+    if return_report:
+        return cleaned, report
+    return cleaned
