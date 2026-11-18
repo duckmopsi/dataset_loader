@@ -282,8 +282,15 @@ class Dataset:
             length = 0.0
             valid_strokes = 0
 
+            first_timestamp = np.inf
+            last_timestamp = -np.inf
+
             for stroke_idx, stroke in enumerate(g):
                 stroke = np.asarray(stroke, dtype=float)
+
+                if self.has_timestamps and stroke.shape[0] > 0:
+                    first_timestamp = min(first_timestamp, float(np.min(stroke[:, 2])))
+                    last_timestamp = max(last_timestamp, float(np.max(stroke[:, 2])))
 
                 if stroke.shape[0] < 3:
                     continue
@@ -320,7 +327,7 @@ class Dataset:
 
                     # duration
 
-                    time += (timestamps[-1] - timestamps[0])
+                    #time += (timestamps[-1] - timestamps[0])
 
                 else:
 
@@ -433,6 +440,8 @@ class Dataset:
             # gesture level features
 
             if valid_strokes > 0:
+                if self.has_timestamps:
+                    time = last_timestamp - first_timestamp
                 area = ((max_x - min_x) * (max_y - min_y))
 
             else:
