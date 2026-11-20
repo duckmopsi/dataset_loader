@@ -108,7 +108,69 @@ class Dataset:
             has_timestamps = False
 
         return cls(gestures=gestures, classes=classes, has_timestamps=has_timestamps, representation="position", dt=dt, classes_oh=classes_oh, class_dims=class_dims, condition_types=condition_types, padded=False, resampled=False, interpolated=False, pos_normalized=False, velo_normalized=False)
-    
+
+    def split(self, ratios=(0.8, 0.1, 0.1), seed=42, mode="participant_independent", participant_index=None):
+
+        if len(ratios) != 3:
+            raise ValueError("ratios must contain exactly three values")
+
+        if any(not np.isfinite(r) or r < 0 for r in ratios):
+            raise ValueError("ratios must be finite and non-negative")
+
+        if not np.isclose(sum(ratios), 1.0):
+            raise ValueError("ratios must sum up to 1")
+
+        if mode not in ("participant_dependent", "participant_independent"):
+            raise ValueError(f"Unknown split mode: {mode}")
+        
+        if mode == "participant_independent" and participant_index is None:
+            raise ValueError("No participant_index given when selecting participant_independent mode.")
+
+        r0, r1, r2 = ratios
+        n = len(self)
+
+        rng = np.random.RandomState(seed)
+
+        if mode == "participant_dependent":
+
+            idx = rng.permutation(n)
+
+            train_end = int(r0 * n)
+            val_end = int((r0 + r1) * n)
+
+            split_idx = (idx[:train_end], idx[train_end:val_end], idx[val_end:])
+
+        else:
+            classes = np.asarray(self.classes)
+
+            if not 0 <= participant_index < classes.shape[1]:
+                raise ValueError("Invalid participant index.")
+            
+            p_ids = classes[:, participant_index]
+            participants = np.unique(p_ids)
+            participants = rng.permutation(participants)
+
+            n_p = len(participants)
+
+            train_end = int(r0 * n_p)
+            val_end = int((r0 + r1) * n_p)
+
+            p_splits = (participants[:train_end], participants[train_end:val_end], participants[val_end:])
+
+            split_idx = tuple(np.flatnonzero(np.isin(p_ids, p_group)) for p_group in p_splits)
+
+            split_idx = tuple(rng.permutation(idx) for idx in split_idx)
+
+        def create_subset(idx):
+            subset = Dataset(gestures=[self.gestures[i] for i in idx], classes=self.classes[idx], has_timestamps=self.has_timestamps, representation=self.representation, padded=self.padded, resampled=self.resampled, interpolated=self.interpolated, pos_normalized=self.pos_normalized, velo_normalized=self.velo_normalized, dt=self.dt, class_dims=self.class_dims, condition_types=self.condition_types)
+
+            if self.classes_oh is not None:
+                subset.classes_oh = [self.classes_oh[i] for i in idx]
+
+            return subset
+
+        return tuple(create_subset(idx) for idx in split_idx)
+  
     def __len__(self):
         return len(self.gestures)
     
