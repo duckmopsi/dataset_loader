@@ -52,7 +52,7 @@ class Dataset:
                     self.classes_oh.append(sample_oh)
 
     @classmethod
-    def from_json(cls, path, dt=None, drop_timestamps=False, classes_oh=False, class_dims=None, condition_types=None, min_size=None, max_size=None, min_strokes=None, max_strokes=None):
+    def from_json(cls, path, dt=None, drop_timestamps=False, classes_oh=False, class_dims=None, condition_types=None, min_strokes=None, max_strokes=None):
         raw = load_json(path)
 
         gestures = []
@@ -74,21 +74,6 @@ class Dataset:
                 continue
 
             if max_strokes is not None and num_strokes > max_strokes:
-                continue
-
-            invalid = False
-
-            for stroke in gesture:
-                stroke_len = len(stroke)
-
-                if min_size is not None and stroke_len < min_size:
-                    invalid = True
-                    break
-                if max_size is not None and stroke_len > max_size:
-                    invalid = True
-                    break
-            
-            if invalid:
                 continue
         
             gesture_has_timestamps = len(gesture[0][0]) == 3
@@ -582,9 +567,12 @@ class Dataset:
         pos_gestures = integrate_velocity(self.gestures, dt)
         return Dataset(gestures=pos_gestures, classes=self.classes, has_timestamps=self.has_timestamps, representation="position", interpolated=self.interpolated, dt=dt, class_dims=self.class_dims, condition_types=self.condition_types, padded=self.padded, resampled=self.resampled, pos_normalized=self.pos_normalized, velo_normalized=False)
 
-    def filter_by_size(self, min_size=None, max_size=None):
-        if min_size is None and max_size is None:
+    def filter_by_size(self, min_size=None, max_size=None, max_time=None):
+        if min_size is None and max_size is None and max_time is None:
             return self
+
+        if max_size is not None and max_time is not None:
+            raise ValueError("max_size and max_time cannot be used simultaneously.")
 
         mask = []
 
@@ -594,6 +582,10 @@ class Dataset:
             for stroke in gesture:
                 stroke_len = len(stroke)
 
+                if stroke_len == 0:
+                    valid = False
+                    break
+
                 if min_size is not None and stroke_len < min_size:
                     valid = False
                     break
@@ -601,6 +593,19 @@ class Dataset:
                 if max_size is not None and stroke_len > max_size:
                     valid = False
                     break
+
+                # TODO: generalize to multi stroke/touch
+                if max_time is not None:
+                    if self.has_timestamps:
+                        if stroke[-1][-1] - stroke[0][-1] > max_time:
+                            valid = False
+                            break
+                    else:
+                        if not self.dt:
+                            raise ValueError("max_time set but no time information availabe.")
+                        if (self.dt * stroke_len - 1) > max_time:
+                            valid = False
+                            break
 
             mask.append(valid)
 
