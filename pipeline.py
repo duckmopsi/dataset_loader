@@ -1,6 +1,6 @@
 def build_dataset_pipeline(dataset, representation="position", mode="resample", num_points=64, 
                            dt=0.02, normalize=False, pos_bounds=None, velo_bounds=None, 
-                           time_bounds=None, pad_value=-1.0, min_size=None, max_size=None):
+                           time_bounds=None, pad_value=-1.0, min_size=None):
     if normalize:
         d_min, d_max, i_min, i_max = pos_bounds
         dataset = dataset.normalize_gestures(d_min, d_max, i_min, i_max)
