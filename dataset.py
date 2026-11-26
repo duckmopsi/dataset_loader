@@ -52,7 +52,10 @@ class Dataset:
                     self.classes_oh.append(sample_oh)
 
     @classmethod
-    def from_json(cls, path, dt=None, drop_timestamps=False, classes_oh=False, class_dims=None, condition_types=None, min_strokes=None, max_strokes=None):
+    def from_json(cls, path, dt=None, drop_timestamps=False, classes_oh=False, class_dims=None, condition_types=None, min_strokes=None, max_strokes=None, timestamp_cleanup='duplicates_only'):
+        if timestamp_cleanup is not None and drop_timestamps:
+            raise ValueError("Timestamp cleanup requires drop_timestamps=False.")
+    
         raw = load_json(path)
 
         gestures = []
@@ -92,7 +95,16 @@ class Dataset:
         if drop_timestamps and has_timestamps:
             has_timestamps = False
 
-        return cls(gestures=gestures, classes=classes, has_timestamps=has_timestamps, representation="position", dt=dt, classes_oh=classes_oh, class_dims=class_dims, condition_types=condition_types, padded=False, resampled=False, interpolated=False, pos_normalized=False, velo_normalized=False)
+        dataset = cls(gestures=gestures, classes=classes, has_timestamps=has_timestamps, representation="position", dt=dt, classes_oh=classes_oh, class_dims=class_dims, condition_types=condition_types, padded=False, resampled=False, interpolated=False, pos_normalized=False, velo_normalized=False)
+
+        if timestamp_cleanup is not None:
+            dataset, report = clean_dataset_timestamps(dataset, on_conflict=timestamp_cleanup, warn=False, return_report=True)
+
+            summary = report["summary"]
+
+            print(f"Timestamp cleanup ({timestamp_cleanup}): {summary['removed_points']} points removed, {summary['affected_gestures']} gestures affected, {summary['conflicting_groups']} conflicting timestamp groups.")
+
+        return dataset
 
     def split(self, ratios=(0.8, 0.1, 0.1), seed=42, mode="participant_independent", participant_index=None):
 

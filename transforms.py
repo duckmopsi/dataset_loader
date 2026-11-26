@@ -279,7 +279,7 @@ def clean_dataset_timestamps(dataset, *, on_conflict="last", viewport_indices=No
     are retained. No automatic distance threshold or exclusion is applied.
     """
 
-    _CONFLICT_POLICIES = {"last", "first", "mean", "error"}
+    _CONFLICT_POLICIES = {"last", "first", "mean", "error", "duplicates_only"}
 
     if on_conflict not in _CONFLICT_POLICIES:
         raise ValueError(f"on_conflict must be one of {sorted(_CONFLICT_POLICIES)}")
@@ -347,7 +347,8 @@ def clean_dataset_timestamps(dataset, *, on_conflict="last", viewport_indices=No
                     step_norms = np.linalg.norm(steps * scales, axis=1)
                     movement = step_norms > 0
                     conflicting_pairs += int(np.count_nonzero(movement))
-                    ident_pairs += int(np.count_nonzero(~movement))
+                    if on_conflict != "duplicates_only":
+                        ident_pairs += int(np.count_nonzero(~movement))
                     if np.any(movement):
                         conflicting_groups += 1
                         max_jump = max(max_jump, float(step_norms.max()))
@@ -356,15 +357,26 @@ def clean_dataset_timestamps(dataset, *, on_conflict="last", viewport_indices=No
                                 f"Different positions at the same timestamp in "
                                 f"gesture {gesture_idx}, stroke {stroke_idx}, time {points[i, 2]}"
                             )
+                if on_conflict == "duplicates_only":
+                    seen = set()
 
-                if on_conflict == "first":
-                    representative = block[0].copy()
-                elif on_conflict == "mean":
-                    representative = block[0].copy()
-                    representative[:2] = np.mean(block[:, :2], axis=0)
-                else:  # 'last' and 'error' (when no conflicts)
-                    representative = block[-1].copy()
-                clean_points.append(representative.tolist())
+                    for point in block:
+                        key = tuple(point.tolist())
+
+                        if key not in seen:
+                            clean_points.append(point.tolist())
+                            seen.add(key)
+
+                    ident_pairs += len(block) - len(seen)
+                else:
+                    if on_conflict == "first":
+                        representative = block[0].copy()
+                    elif on_conflict == "mean":
+                        representative = block[0].copy()
+                        representative[:2] = np.mean(block[:, :2], axis=0)
+                    else:  # 'last' and 'error' (when no conflicts)
+                        representative = block[-1].copy()
+                    clean_points.append(representative.tolist())
                 i = j
 
             new_gesture.append(clean_points)
@@ -379,14 +391,14 @@ def clean_dataset_timestamps(dataset, *, on_conflict="last", viewport_indices=No
             if conflicting_groups:
                 totals["conflicted_strokes"] += 1
                 gesture_conflicts = True
-            if len(clean_points) < 3:
+            if group_count < 3:
                 totals["strokes_with_fewer_than_3_unique_times"] += 1
                 gesture_short = True
             gesture_max_jump = max(gesture_max_jump, max_jump)
             gesture_duplicate_pairs += removed
             gesture_moving_pairs += conflicting_pairs
 
-            if removed or len(clean_points) < 3:
+            if removed or conflicting_groups or group_count < 3:
                 affected_strokes.append({
                     "gesture_idx": gesture_idx,
                     "stroke_idx": stroke_idx,
