@@ -540,8 +540,36 @@ class Dataset:
         if not self.has_timestamps:
             raise ValueError("Interpolation needs timestamps.")
         interp = []
-        for gesture in self.gestures:
-            interp.append(interpolate_gesture(gesture, dt))
+        for i, gesture in enumerate(self.gestures):
+            try:
+                interp.append(interpolate_gesture(gesture, dt))
+
+            except Exception as e:
+                print(f"\nInterpolation failed for gesture {i}")
+                print(f"Error: {type(e).__name__}: {e}")
+                print(f"Number of strokes: {len(gesture)}")
+
+                for stroke_idx, stroke in enumerate(gesture):
+                    arr = np.asarray(stroke)
+
+                    print(f"\nStroke {stroke_idx}")
+                    print(f"Shape: {arr.shape}")
+
+                    with np.printoptions(threshold=np.inf, linewidth=200):
+                        print("Complete original stroke:")
+                        print(arr)
+
+                    if arr.ndim == 2 and arr.shape[1] >= 3:
+                        time_diffs = np.diff(arr[:, 2])
+                        invalid = np.flatnonzero(~np.isfinite(time_diffs) | (time_diffs <= 0))
+
+                        print(f"Invalid timestamp differences: {len(invalid)}")
+
+                        for j in invalid:
+                            print(f"Points {j} and {j + 1}: {arr[j]} -> {arr[j + 1]}")
+
+                raise
+
         
         return Dataset(gestures=interp, classes=self.classes, has_timestamps=False, representation=self.representation, interpolated=True, dt=dt, class_dims=self.class_dims, condition_types=self.condition_types, padded=False, resampled=False, pos_normalized=self.pos_normalized, velo_normalized=self.velo_normalized)
 
